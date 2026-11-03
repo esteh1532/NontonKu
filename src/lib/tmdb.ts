@@ -69,7 +69,7 @@ async function mintaTmdb(jalur: string, parameter: Record<string, string> = {}) 
   url.searchParams.set("language", "id-ID");
   for (const [k, v] of Object.entries(parameter)) url.searchParams.set(k, v);
   const jawaban = await fetch(url, {
-    headers: pakaiToken ? { Authorization: `Bearer ${kunci}`, accept: "application/json" } : undefined,
+    headers: pakaiToken ? { Authorization: `Bearer ${kunci}`, accept: "application/json" } : {},
   });
   if (!jawaban.ok) throw new Error(`TMDB menolak permintaan (${jawaban.status}).`);
   return await jawaban.json();
