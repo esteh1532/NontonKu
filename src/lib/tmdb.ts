@@ -60,13 +60,17 @@ const ALAMAT_GAMBAR = "https://image.tmdb.org/t/p";
 
 /** Permintaan sederhana ke TMDB, selalu dalam bahasa Indonesia. */
 async function mintaTmdb(jalur: string, parameter: Record<string, string> = {}) {
-  const kunci = process.env["TMDB_API_KEY"];
+  const kunci = (process.env["TMDB_API_KEY"] ?? process.env["TMDB_TOKEN"] ?? "").trim();
   if (!kunci) throw new Error("Kunci TMDB belum diatur (TMDB_API_KEY).");
   const url = new URL(ALAMAT_TMDB + jalur);
-  url.searchParams.set("api_key", kunci);
+  // Mendukung "API Key" (pendek) maupun "Read Access Token" (panjang, diawali eyJ).
+  const pakaiToken = kunci.startsWith("eyJ");
+  if (!pakaiToken) url.searchParams.set("api_key", kunci);
   url.searchParams.set("language", "id-ID");
   for (const [k, v] of Object.entries(parameter)) url.searchParams.set(k, v);
-  const jawaban = await fetch(url);
+  const jawaban = await fetch(url, {
+    headers: pakaiToken ? { Authorization: `Bearer ${kunci}`, accept: "application/json" } : undefined,
+  });
   if (!jawaban.ok) throw new Error(`TMDB menolak permintaan (${jawaban.status}).`);
   return await jawaban.json();
 }
