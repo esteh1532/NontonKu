@@ -12,4 +12,7 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  // When building on Vercel, output Vercel's format instead of Cloudflare's
+  // (Lovable's own publishing ignores this and keeps its own target).
+  ...(process.env["VERCEL"] ? { nitro: { preset: "vercel" } } : {}),
 });
