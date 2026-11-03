@@ -60,7 +60,7 @@ const ALAMAT_GAMBAR = "https://image.tmdb.org/t/p";
 
 /** Permintaan sederhana ke TMDB, selalu dalam bahasa Indonesia. */
 async function mintaTmdb(jalur: string, parameter: Record<string, string> = {}) {
-  const kunci = (process.env["TMDB_API_KEY"] ?? process.env["TMDB_TOKEN"] ?? "").trim();
+  const kunci = (process.env["30fe61dcef55c4dd92869416faff4813"] ?? process.env["TMDB_TOKEN"] ?? "").trim();
   if (!kunci) throw new Error("Kunci TMDB belum diatur (TMDB_API_KEY).");
   const url = new URL(ALAMAT_TMDB + jalur);
   // Mendukung "API Key" (pendek) maupun "Read Access Token" (panjang, diawali eyJ).
