@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { LoaderCircle } from "lucide-react";
 
@@ -7,6 +7,7 @@ import {
   cekIdTersedia,
   daftar,
   masuk,
+  useSesi,
   ID_PESAN,
 } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -48,6 +49,12 @@ function HalamanAuth() {
   const [sibuk, setSibuk] = useState(false);
   const [pesanCek, setPesanCek] = useState("");
   const tujuan = lanjut ?? "/";
+  const { sesi, memuat } = useSesi();
+
+  // Sudah masuk? Tidak perlu melihat halaman login lagi.
+  useEffect(() => {
+    if (!memuat && sesi) navigate({ to: tujuan, replace: true });
+  }, [memuat, sesi, navigate, tujuan]);
 
   function ke(t: string) {
     navigate({ to: t });

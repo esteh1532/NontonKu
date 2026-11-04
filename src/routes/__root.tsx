@@ -4,23 +4,18 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
-  useNavigate,
   HeadContent,
   Scripts,
   type ErrorComponentProps,
 } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode, type FormEvent } from "react";
-import { Search, LogOut, User, Clapperboard } from "lucide-react";
-import { toast } from "sonner";
+import { type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
-import { useSesi, keluar } from "@/lib/auth";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SesiProvider } from "@/lib/auth";
+import { NAMA_APLIKASI } from "@/lib/konfigurasi";
+import { BilahAtas, BilahBawah } from "@/components/NavigasiUtama";
+import { PopupDonasi } from "@/components/PopupDonasi";
 import { Toaster } from "@/components/ui/sonner";
-
-const NAMA_APLIKASI = "NontonKu";
 
 function NotFoundComponent() {
   return (
@@ -47,9 +42,6 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -82,79 +74,11 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
   );
 }
 
-function BilahAtas() {
-  const { sesi, memuat } = useSesi();
-  const navigate = useNavigate();
-  const [kata, setKata] = useState("");
-
-  async function cari(e: FormEvent) {
-    e.preventDefault();
-    const q = kata.trim();
-    if (q) await navigate({ to: "/", search: { cari: q } });
-  }
-
-  async function keluarAkun() {
-    await keluar();
-    toast("Sampai jumpa lagi!");
-    await navigate({ to: "/auth", replace: true });
-  }
-
-  return (
-    <header className="sticky top-0 z-50 min-w-0 border-b border-border/60 bg-background/85 backdrop-blur">
-      <div className="mx-auto grid h-14 max-w-6xl grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-4 sm:flex sm:gap-4">
-        <Link to="/" className="flex shrink-0 items-center gap-2">
-          <Clapperboard className="size-5 text-primary" />
-          <span className="judul-bagian hidden text-2xl leading-none text-foreground sm:block">
-            {NAMA_APLIKASI}
-          </span>
-        </Link>
-        <form onSubmit={cari} className="relative min-w-0 sm:ml-4 sm:w-72 sm:flex-none">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={kata}
-            onChange={(e) => setKata(e.target.value)}
-            placeholder="Cari film atau series…"
-            className="h-9 rounded-full bg-card pl-9"
-            aria-label="Cari film atau series"
-          />
-        </form>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {memuat ? (
-            <div className="size-8 animate-pulse rounded-full bg-muted" aria-hidden="true" />
-          ) : sesi ? (
-            <>
-              <Button asChild variant="ghost" size="sm" className="max-w-28 sm:max-w-40">
-                <Link to="/akun">
-                  <User className="size-4" />
-                  <span className="truncate">{sesi.idPengguna || "Tontonan"}</span>
-                </Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={keluarAkun}
-                aria-label="Keluar dari akun"
-                title="Keluar"
-              >
-                <LogOut className="size-4" />
-              </Button>
-            </>
-          ) : (
-            <Button asChild size="sm" className="rounded-full">
-              <Link to="/auth">Masuk</Link>
-            </Button>
-          )}
-        </div>
-      </div>
-    </header>
-  );
-}
-
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
       { title: NAMA_APLIKASI },
       {
         name: "description",
@@ -208,15 +132,21 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="flex min-h-screen flex-col bg-background">
-        <BilahAtas />
-        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-        <Outlet />
-        <footer className="border-t border-border/60 py-6 text-center text-xs text-muted-foreground">
-          {NAMA_APLIKASI} · film & series dari TMDB
-        </footer>
-        <Toaster position="top-center" />
-      </div>
+      <SesiProvider>
+        <div className="flex min-h-screen min-w-0 flex-col bg-background">
+          <BilahAtas />
+          {/* Wajib: halaman anak dirender di sini. */}
+          <div className="flex min-w-0 flex-1 flex-col pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
+            <Outlet />
+          </div>
+          <footer className="hidden border-t border-border/60 py-6 text-center text-xs text-muted-foreground md:block">
+            {NAMA_APLIKASI} · data film & series dari TMDB
+          </footer>
+          <BilahBawah />
+          <PopupDonasi />
+          <Toaster position="top-center" />
+        </div>
+      </SesiProvider>
     </QueryClientProvider>
   );
 }

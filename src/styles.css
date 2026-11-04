@@ -73,9 +73,31 @@
     border-color: var(--color-border);
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+    overflow-x: clip;
+  }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: clip;
+    /* Kalimat panjang turun ke baris berikutnya, tidak melebarkan halaman. */
+    overflow-wrap: anywhere;
+  }
+
+  img,
+  video,
+  iframe {
+    max-width: 100%;
+  }
+
+  /* Tombol dan lencana pendek tetap satu baris; teks panjang lainnya boleh membungkus. */
+  button,
+  a {
+    overflow-wrap: break-word;
   }
 }
 

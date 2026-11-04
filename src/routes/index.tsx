@@ -1,44 +1,39 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSuspenseQuery, useQuery } from "@tanstack/react-query";
-import { Film, Tv, SearchX, Play, History } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { Film, Tv, SearchX, Play, History, ChevronLeft, ChevronRight } from "lucide-react";
 
-import {
-  opsiKatalog,
-  opsiGenre,
-  type Film as FilmItem,
-  type Jenis,
-} from "@/lib/tmdb";
+import { opsiKatalog, opsiGenre, type Film as FilmItem, type Jenis } from "@/lib/tmdb";
 import { daftarRiwayat } from "@/lib/koleksi";
 import { useSesi } from "@/lib/auth";
+import { KartuFilm } from "@/components/KartuFilm";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 const JUDUL = "NontonKu — Tonton Film & Series Langsung";
 const DESKRIPSI =
   "Nonton film & series langsung dari browser — cari judul, pilih server, lanjutkan tontonanmu.";
 
+type CarianBeranda = { genre?: number; halaman?: number; jenis?: "tv" };
+
 export const Route = createFileRoute("/")({
-  validateSearch: (search: Record<string, unknown>) => {
-    const hasil: { cari?: string; genre?: number; halaman?: number; jenis?: "tv" } = {};
-    if (typeof search["cari"] === "string" && search["cari"].trim()) hasil.cari = search["cari"].trim();
-    if (typeof search["genre"] === "number") hasil.genre = search["genre"];
-    if (typeof search["halaman"] === "number" && search["halaman"] > 1) hasil.halaman = search["halaman"];
+  validateSearch: (search: Record<string, unknown>): CarianBeranda => {
+    const hasil: CarianBeranda = {};
+    const genre = Number(search["genre"]);
+    const halaman = Number(search["halaman"]);
+    if (Number.isInteger(genre) && genre > 0) hasil.genre = genre;
+    if (Number.isInteger(halaman) && halaman > 1) hasil.halaman = Math.min(halaman, 500);
     if (search["jenis"] === "tv") hasil.jenis = "tv";
     return hasil;
   },
   loaderDeps: ({ search }) => ({
     jenis: search.jenis,
-    cari: search.cari,
     genre: search.genre,
     halaman: search.halaman,
   }),
   loader: async ({ deps, context }) => {
+    const jenis: Jenis = deps.jenis ?? "movie";
     await Promise.all([
-      context.queryClient.ensureQueryData(
-        opsiKatalog(deps.jenis ?? "movie", deps.cari, deps.genre, deps.halaman ?? 1),
-      ),
-      context.queryClient.ensureQueryData(opsiGenre(deps.jenis ?? "movie")),
+      context.queryClient.ensureQueryData(opsiKatalog(jenis, deps.genre, deps.halaman ?? 1)),
+      context.queryClient.ensureQueryData(opsiGenre(jenis)),
     ]);
   },
   component: HalamanUtama,
@@ -54,75 +49,38 @@ export const Route = createFileRoute("/")({
   }),
 });
 
-function KartuFilm({ film, jenis }: { film: FilmItem; jenis: Jenis }) {
-  const tahun = film.rilis ? film.rilis.slice(0, 4) : "";
-  return (
-    <Link
-      to="/nonton/$id"
-      params={{ id: String(film.id) }}
-      search={{ jenis }}
-      className="group block muncul-lembut"
-    >
-      <div className="relative overflow-hidden rounded-xl bg-card shadow-layar">
-        {film.poster ? (
-          <img
-            src={film.poster}
-            alt={`Poster ${film.judul}`}
-            loading="lazy"
-            className="aspect-[2/3] w-full object-cover transition duration-300 group-hover:scale-105"
-          />
-        ) : (
-          <div className="flex aspect-[2/3] w-full items-center justify-center text-muted-foreground">
-            <Film className="size-10" />
-          </div>
-        )}
-        {film.rating > 0 && (
-          <span className="absolute right-2 top-2 rounded-full bg-background/80 px-2 py-0.5 text-xs font-medium backdrop-blur">
-            ★ {film.rating.toFixed(1)}
-          </span>
-        )}
-        {jenis === "tv" && (
-          <span className="absolute left-2 top-2 rounded-full bg-background/80 px-2 py-0.5 text-xs font-medium backdrop-blur">
-            Series
-          </span>
-        )}
-      </div>
-      <p className="mt-2 truncate text-sm font-medium text-foreground">{film.judul}</p>
-      <p className="text-xs text-muted-foreground">{tahun}</p>
-    </Link>
-  );
-}
-
-function Hero({ film }: { film: FilmItem }) {
+function Hero({ film, jenis }: { film: FilmItem; jenis: Jenis }) {
   return (
     <section className="relative mt-4 overflow-hidden rounded-2xl shadow-layar">
       <div className="relative aspect-[16/10] w-full sm:aspect-[21/8]">
         {film.latar ? (
           <img
             src={film.latar}
-            alt={`Latar film ${film.judul}`}
+            alt={`Latar ${film.judul}`}
             className="absolute inset-0 size-full object-cover"
           />
         ) : (
           <div className="absolute inset-0 size-full bg-card" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 p-4 sm:p-8">
+        <div className="absolute inset-x-0 bottom-0 min-w-0 p-4 sm:p-8">
           <p className="text-xs font-medium uppercase tracking-widest text-primary">
             Sedang populer minggu ini
           </p>
-          <h1 className="judul-bagian mt-1 text-4xl leading-none text-foreground sm:text-6xl">
+          <h1 className="judul-bagian mt-1 line-clamp-2 break-words text-3xl leading-none text-foreground sm:text-6xl">
             {film.judul}
           </h1>
-          <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-            ★ {film.rating.toFixed(1)}
+          <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
+            <span>★ {film.rating.toFixed(1)}</span>
             {film.rilis && <span>· {film.rilis.slice(0, 4)}</span>}
           </p>
           {film.sinopsis && (
-            <p className="mt-2 line-clamp-3 max-w-xl text-sm text-muted-foreground">{film.sinopsis}</p>
+            <p className="mt-2 line-clamp-3 max-w-xl break-words text-sm text-muted-foreground">
+              {film.sinopsis}
+            </p>
           )}
           <Button asChild size="lg" className="mt-4 rounded-full font-semibold">
-            <Link to="/nonton/$id" params={{ id: String(film.id) }} search={{ jenis: "movie" }}>
+            <Link to="/nonton/$id" params={{ id: String(film.id) }} search={{ jenis }}>
               <Play className="size-5 fill-current" />
               Tonton sekarang
             </Link>
@@ -169,9 +127,9 @@ function LanjutTonton({ aktif }: { aktif: boolean }) {
             ) : (
               <div className="aspect-[2/3] w-full rounded-lg bg-card" />
             )}
-            <p className="mt-1 truncate text-xs text-muted-foreground">{item.title}</p>
+            <p className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{item.title}</p>
             {item.media_type === "tv" && item.episode_number && (
-              <p className="truncate text-[11px] text-primary/80">
+              <p className="text-[11px] text-primary/80">
                 E{item.episode_number}
                 {item.season_number ? ` · S${item.season_number}` : ""}
               </p>
@@ -184,60 +142,50 @@ function LanjutTonton({ aktif }: { aktif: boolean }) {
 }
 
 function HalamanUtama() {
-  const { cari, genre, halaman = 1, jenis } = Route.useSearch();
+  const { genre, halaman = 1, jenis } = Route.useSearch();
   const jenisAktif: Jenis = jenis ?? "movie";
   const { sesi } = useSesi();
-  const navigate = useNavigate();
-  const [kata, setKata] = useState("");
 
-  const katalog = useSuspenseQuery(opsiKatalog(jenisAktif, cari, genre, halaman));
+  const katalog = useSuspenseQuery(opsiKatalog(jenisAktif, genre, halaman));
   const genreList = useSuspenseQuery(opsiGenre(jenisAktif));
-  const hasil = katalog.data;
-  const hero = !cari && !genre && jenisAktif === "movie" && hasil.length > 0 ? hasil[0] : null;
-  const judulBagian = cari
-    ? `Hasil pencarian "${cari}"`
-    : genre
-      ? (genreList.data.find((g) => g.id === genre)?.nama ?? (jenisAktif === "tv" ? "Series" : "Film"))
-      : jenisAktif === "tv"
-        ? "Series populer"
-        : "Sedang populer";
+  const { hasil, totalHalaman } = katalog.data;
+  const hero = !genre && halaman === 1 && hasil.length > 0 ? hasil[0] : null;
+  const judulBagian = genre
+    ? (genreList.data.find((g) => g.id === genre)?.nama ?? (jenisAktif === "tv" ? "Series" : "Film"))
+    : jenisAktif === "tv"
+      ? "Series populer"
+      : "Film populer";
 
-  function carianBeranda(
-    dengan: { genre?: number; halaman?: number; tanpaGenre?: boolean } = {},
-  ): { cari?: string; genre?: number; halaman?: number; jenis?: "tv" } {
-    const hasil: { cari?: string; genre?: number; halaman?: number; jenis?: "tv" } = {};
-    if (cari) hasil.cari = cari;
-    if (jenisAktif === "tv") hasil.jenis = "tv";
-    if (!dengan.tanpaGenre && genre) hasil.genre = genre;
-    if (dengan.genre) hasil.genre = dengan.genre;
-    if (dengan.halaman && dengan.halaman > 1) hasil.halaman = dengan.halaman;
-    return hasil;
-  }
+  // Pencarian URL dibuat eksplisit supaya pindah Film ↔ Series selalu bekerja
+  // dua arah dan tidak membawa genre/halaman dari jenis sebelumnya.
+  const cari = (dengan: CarianBeranda = {}): CarianBeranda => ({
+    ...(jenisAktif === "tv" ? { jenis: "tv" as const } : {}),
+    ...dengan,
+  });
+  const keHalaman = (n: number): CarianBeranda =>
+    cari({ ...(genre ? { genre } : {}), ...(n > 1 ? { halaman: n } : {}) });
 
-  async function kirimCari(e: FormEvent) {
-    e.preventDefault();
-    const q = kata.trim();
-    if (q) await navigate({ to: "/", search: { cari: q } });
-  }
+  const kelasTab = (aktif: boolean) =>
+    `rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+      aktif ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+    }`;
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-6xl px-4 pb-16">
-      {hero && <Hero film={hero} />}
+      {hero && <Hero film={hero} jenis={jenisAktif} />}
 
       <LanjutTonton aktif={!!sesi} />
 
       <section className="mt-8">
-        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 sm:flex sm:justify-between">
-          <h2 className="judul-bagian min-w-0 truncate text-2xl text-foreground">{judulBagian}</h2>
-          <div className="flex shrink-0 items-center gap-1 rounded-full bg-muted p-1">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="judul-bagian min-w-0 break-words text-2xl text-foreground">{judulBagian}</h2>
+          <div className="flex shrink-0 items-center gap-1 rounded-full bg-muted p-1" role="tablist">
             <Link
               to="/"
-              search={carianBeranda({ tanpaGenre: true })}
-              className={`rounded-full px-3 py-1 text-sm font-medium capitalize transition-colors ${
-                jenisAktif === "movie"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground"
-              }`}
+              search={{}}
+              role="tab"
+              aria-selected={jenisAktif === "movie"}
+              className={kelasTab(jenisAktif === "movie")}
             >
               <span className="flex items-center gap-1">
                 <Film className="size-3.5" />
@@ -246,10 +194,10 @@ function HalamanUtama() {
             </Link>
             <Link
               to="/"
-              search={{ ...carianBeranda({ tanpaGenre: true }), jenis: "tv" }}
-              className={`rounded-full px-3 py-1 text-sm font-medium capitalize transition-colors ${
-                jenisAktif === "tv" ? "bg-primary text-primary-foreground" : "text-muted-foreground"
-              }`}
+              search={{ jenis: "tv" }}
+              role="tab"
+              aria-selected={jenisAktif === "tv"}
+              className={kelasTab(jenisAktif === "tv")}
             >
               <span className="flex items-center gap-1">
                 <Tv className="size-3.5" />
@@ -266,10 +214,7 @@ function HalamanUtama() {
             size="sm"
             className="shrink-0 rounded-full"
           >
-            <Link
-              to="/"
-              search={carianBeranda({ tanpaGenre: true })}
-            >
+            <Link to="/" search={cari()}>
               Populer
             </Link>
           </Button>
@@ -281,10 +226,7 @@ function HalamanUtama() {
               size="sm"
               className="shrink-0 rounded-full"
             >
-              <Link
-                to="/"
-                search={carianBeranda({ genre: g.id })}
-              >
+              <Link to="/" search={cari({ genre: g.id })}>
                 {g.nama}
               </Link>
             </Button>
@@ -300,39 +242,44 @@ function HalamanUtama() {
         {hasil.length === 0 && (
           <div className="mt-10 flex flex-col items-center gap-3 text-center text-muted-foreground">
             <SearchX className="size-10" />
-            <p>Tidak ada hasil yang cocok. Coba kata kunci atau genre lain.</p>
+            <p>Belum ada hasil untuk pilihan ini. Coba genre lain.</p>
           </div>
         )}
 
-        {(halaman > 1 || hasil.length >= 20) && (
-          <div className="mt-8 flex items-center justify-center gap-4">
-            {halaman > 1 && (
+        {totalHalaman > 1 && (
+          <div className="mt-8 flex items-center justify-center gap-3">
+            {halaman > 1 ? (
               <Button asChild variant="outline" size="sm">
-                <Link to="/" search={carianBeranda({ halaman: halaman - 1 })}>
+                <Link to="/" search={keHalaman(halaman - 1)}>
+                  <ChevronLeft className="size-4" />
                   Sebelumnya
                 </Link>
               </Button>
+            ) : (
+              <Button variant="outline" size="sm" disabled>
+                <ChevronLeft className="size-4" />
+                Sebelumnya
+              </Button>
             )}
-            <span className="text-sm text-muted-foreground">Halaman {halaman}</span>
-            <Button asChild variant="outline" size="sm">
-              <Link to="/" search={carianBeranda({ halaman: halaman + 1 })}>
+            <span className="text-sm text-muted-foreground">
+              {halaman} / {totalHalaman}
+            </span>
+            {halaman < totalHalaman ? (
+              <Button asChild variant="outline" size="sm">
+                <Link to="/" search={keHalaman(halaman + 1)}>
+                  Berikutnya
+                  <ChevronRight className="size-4" />
+                </Link>
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" disabled>
                 Berikutnya
-              </Link>
-            </Button>
+                <ChevronRight className="size-4" />
+              </Button>
+            )}
           </div>
         )}
       </section>
-
-      {/* Form pencarian kecil juga tersedia di bawah untuk pengguna HP */}
-      <form onSubmit={kirimCari} className="mt-10 sm:hidden">
-        <Input
-          value={kata}
-          onChange={(e) => setKata(e.target.value)}
-          placeholder="Cari judul lain…"
-          className="rounded-full bg-card"
-          aria-label="Cari film atau series"
-        />
-      </form>
     </main>
   );
 }

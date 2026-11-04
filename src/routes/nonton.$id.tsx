@@ -1,6 +1,6 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { toast } from "sonner";
 import {
   ChevronLeft,
@@ -11,6 +11,10 @@ import {
   Play,
   ListVideo,
   Clapperboard,
+  Maximize,
+  Minimize,
+  SkipForward,
+  X,
 } from "lucide-react";
 
 import {
@@ -25,25 +29,30 @@ import {
 } from "@/lib/tmdb";
 import { catatRiwayat, cekTersimpan, setTersimpan } from "@/lib/koleksi";
 import { useSesi } from "@/lib/auth";
+import { ubahPengaturan, usePengaturan } from "@/lib/pengaturan";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 const JUDUL_DASAR = "NontonKu — Tonton Film & Series Langsung";
+const JEDA_AUTOPLAY_DETIK = 8;
 
 /**
  * Daftar server pemutar. Urutan = urutan tombol di halaman.
- * - Server 1: Vidlink (utama, subtitle lengkap)
- * - Server 2: CineSrc (lengkap, ada lompat episode otomatis)
- * - Server 3: EmbedMaster (kualitas penuh)
+ * Catatan format alamat series: Server 1 (Vidlink) dan Server 3 (EmbedMaster)
+ * memakai bentuk jalur /tv/{id}/{musim}/{episode}. Server 2 (CineSrc) memakai
+ * parameter ?s=&e=. Memakai format yang salah membuat series selalu error.
  */
 const DAFTAR_SERVER = [
   {
     nama: "Server 1",
     keterangan: "Utama · subtitle lengkap",
-    alamat: (id: number, jenis: Jenis, musim: number, episode: number) =>
-      jenis === "tv"
-        ? `https://vidlink.pro/tv/${id}?s=${musim}&e=${episode}`
-        : `https://vidlink.pro/movie/${id}`,
+    alamat: (id: number, jenis: Jenis, musim: number, episode: number, otomatis: boolean) => {
+      const dasar =
+        jenis === "tv"
+          ? `https://vidlink.pro/tv/${id}/${musim}/${episode}`
+          : `https://vidlink.pro/movie/${id}`;
+      return otomatis ? `${dasar}?autoplay=true` : dasar;
+    },
   },
   {
     nama: "Server 2",
@@ -56,33 +65,53 @@ const DAFTAR_SERVER = [
   {
     nama: "Server 3",
     keterangan: "EmbedMaster · kualitas penuh",
-    alamat: (id: number, jenis: Jenis, _musim: number, _episode: number) =>
-      jenis === "tv"
-        ? `https://embedmaster.link/tv/${id}?s=${_musim}&e=${_episode}&skin=onyx&welcome_page=on&autoplay=off`
-        : `https://embedmaster.link/movie/${id}?skin=onyx&welcome_page=on&autoplay=off`,
+    alamat: (id: number, jenis: Jenis, musim: number, episode: number, otomatis: boolean) => {
+      const dasar =
+        jenis === "tv"
+          ? `https://embedmaster.link/tv/${id}/${musim}/${episode}`
+          : `https://embedmaster.link/movie/${id}`;
+      return otomatis
+        ? `${dasar}?skin=onyx&welcome_page=off&autoplay=on`
+        : `${dasar}?skin=onyx&welcome_page=on&autoplay=off`;
+    },
   },
 ] as const;
 
+const ASAL_PEMUTAR = new Set(["https://vidlink.pro", "https://cinesrc.st", "https://embedmaster.link"]);
+
+type CarianNonton = { jenis: "movie" | "tv"; s?: number; e?: number; server?: number };
+
 export const Route = createFileRoute("/nonton/$id")({
-  validateSearch: (search: Record<string, unknown>) => {
-    const hasil: { jenis?: "movie" | "tv"; s?: number; e?: number; server?: number } = {};
-    hasil.jenis = search["jenis"] === "tv" ? "tv" : "movie";
-    if (typeof search["s"] === "number" && search["s"] >= 1) hasil.s = Math.trunc(search["s"]);
-    if (typeof search["e"] === "number" && search["e"] >= 1) hasil.e = Math.trunc(search["e"]);
-    if (typeof search["server"] === "number")
-      hasil.server = Math.min(Math.max(Math.trunc(search["server"]), 0), DAFTAR_SERVER.length - 1);
+  validateSearch: (search: Record<string, unknown>): CarianNonton => {
+    const hasil: CarianNonton = { jenis: search["jenis"] === "tv" ? "tv" : "movie" };
+    const s = Number(search["s"]);
+    const e = Number(search["e"]);
+    const server = Number(search["server"]);
+    if (Number.isInteger(s) && s >= 1) hasil.s = s;
+    if (Number.isInteger(e) && e >= 1) hasil.e = e;
+    if (Number.isInteger(server))
+      hasil.server = Math.min(Math.max(server, 0), DAFTAR_SERVER.length - 1);
     return hasil;
   },
   loaderDeps: ({ search }) => ({ jenis: search.jenis, s: search.s }),
   loader: async ({ params, context, deps }) => {
     const id = Number(params.id);
+    if (!Number.isInteger(id) || id <= 0) throw notFound();
     const jenis: Jenis = deps.jenis ?? "movie";
-    const detail = (
-      jenis === "tv"
-        ? await context.queryClient.ensureQueryData(opsiDetailSeries(id))
-        : await context.queryClient.ensureQueryData(opsiDetailFilm(id))
-    ) as DetailFilm | DetailSeries;
-    const tunggu: Promise<unknown>[] = [context.queryClient.ensureQueryData(opsiRekomendasi(jenis, id))];
+    let detail: DetailFilm | DetailSeries;
+    try {
+      detail = (
+        jenis === "tv"
+          ? await context.queryClient.ensureQueryData(opsiDetailSeries(id))
+          : await context.queryClient.ensureQueryData(opsiDetailFilm(id))
+      ) as DetailFilm | DetailSeries;
+    } catch (galat) {
+      if (galat instanceof Error && galat.message.includes("(404)")) throw notFound();
+      throw galat;
+    }
+    const tunggu: Promise<unknown>[] = [
+      context.queryClient.ensureQueryData(opsiRekomendasi(jenis, id)),
+    ];
     if (jenis === "tv") {
       tunggu.push(context.queryClient.ensureQueryData(opsiEpisode(id, deps.s ?? 1)));
     }
@@ -93,9 +122,7 @@ export const Route = createFileRoute("/nonton/$id")({
   head: (ctx) => ({
     meta: [
       {
-        title: ctx.loaderData?.judul
-          ? `${ctx.loaderData.judul} — NontonKu`
-          : `Tonton — ${JUDUL_DASAR}`,
+        title: ctx.loaderData?.judul ? `${ctx.loaderData.judul} — NontonKu` : `Tonton — ${JUDUL_DASAR}`,
       },
       {
         name: "description",
@@ -114,18 +141,46 @@ export const Route = createFileRoute("/nonton/$id")({
   }),
 });
 
-/** Baris rekomendasi untuk film: usulan dengan genre serupa film yang baru ditonton. */
-function RekomendasiFilm({ id }: { id: number }) {
-  const rekomendasi = useSuspenseQuery(opsiRekomendasi("movie", id));
+/* ---------- Riwayat pemutaran dalam satu sesi (cegah autoplay berputar) ---------- */
+
+const KUNCI_SESI = "nontonku:diputar";
+
+function bacaDiputar(): string[] {
+  try {
+    const nilai = JSON.parse(sessionStorage.getItem(KUNCI_SESI) ?? "[]") as unknown;
+    return Array.isArray(nilai) ? nilai.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function tandaiDiputar(kunci: string) {
+  try {
+    const daftar = bacaDiputar();
+    if (!daftar.includes(kunci)) sessionStorage.setItem(KUNCI_SESI, JSON.stringify([...daftar, kunci].slice(-60)));
+  } catch {
+    /* abaikan */
+  }
+}
+
+/* ---------- Rekomendasi ---------- */
+
+function BarisRekomendasi({ jenis, id }: { jenis: Jenis; id: number }) {
+  const rekomendasi = useSuspenseQuery(opsiRekomendasi(jenis, id));
   if (!rekomendasi.data.length) return null;
+  const tv = jenis === "tv";
   return (
     <section className="mt-10">
       <h2 className="judul-bagian flex items-center gap-2 text-xl text-foreground">
-        <Clapperboard className="size-4 text-primary" />
-        Rekomendasi film selanjutnya
+        {tv ? (
+          <ListVideo className="size-4 text-primary" />
+        ) : (
+          <Clapperboard className="size-4 text-primary" />
+        )}
+        {tv ? "Series serupa" : "Rekomendasi film selanjutnya"}
       </h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        Dipilih dari film dengan genre mirip seperti yang baru kamu tonton.
+        Dipilih dari {tv ? "series" : "film"} dengan genre yang sama seperti yang sedang kamu tonton.
       </p>
       <div className="baris-gulir mt-3 flex gap-3 overflow-x-auto pb-2">
         {rekomendasi.data.map((film) => (
@@ -133,7 +188,7 @@ function RekomendasiFilm({ id }: { id: number }) {
             key={film.id}
             to="/nonton/$id"
             params={{ id: String(film.id) }}
-            search={{ jenis: "movie" }}
+            search={{ jenis }}
             className="w-28 shrink-0 sm:w-36"
           >
             <div className="relative overflow-hidden rounded-xl bg-card shadow-layar">
@@ -153,10 +208,10 @@ function RekomendasiFilm({ id }: { id: number }) {
                 </span>
               )}
             </div>
-            <p className="mt-1.5 truncate text-xs font-medium text-foreground">{film.judul}</p>
-            <p className="text-[11px] text-muted-foreground">
-              {film.rilis ? film.rilis.slice(0, 4) : ""}
+            <p className="mt-1.5 line-clamp-2 break-words text-xs font-medium leading-snug text-foreground">
+              {film.judul}
             </p>
+            <p className="text-[11px] text-muted-foreground">{film.rilis ? film.rilis.slice(0, 4) : ""}</p>
           </Link>
         ))}
       </div>
@@ -164,114 +219,77 @@ function RekomendasiFilm({ id }: { id: number }) {
   );
 }
 
-/** Series serupa, ditampilkan di halaman series. */
-function RekomendasiSeries({ id }: { id: number }) {
-  const rekomendasi = useSuspenseQuery(opsiRekomendasi("tv", id));
-  if (!rekomendasi.data.length) return null;
-  return (
-    <section className="mt-10">
-      <h2 className="judul-bagian flex items-center gap-2 text-xl text-foreground">
-        <ListVideo className="size-4 text-primary" />
-        Series lainnya
-      </h2>
-      <div className="baris-gulir mt-3 flex gap-3 overflow-x-auto pb-2">
-        {rekomendasi.data.map((film) => (
-          <Link
-            key={film.id}
-            to="/nonton/$id"
-            params={{ id: String(film.id) }}
-            search={{ jenis: "tv" }}
-            className="w-28 shrink-0 sm:w-36"
-          >
-            <div className="relative overflow-hidden rounded-xl bg-card shadow-layar">
-              {film.poster ? (
-                <img
-                  src={film.poster}
-                  alt={`Poster ${film.judul}`}
-                  loading="lazy"
-                  className="aspect-[2/3] w-full object-cover"
-                />
-              ) : (
-                <div className="aspect-[2/3] w-full bg-card" />
-              )}
-              {film.rating > 0 && (
-                <span className="absolute right-1.5 top-1.5 rounded-full bg-background/80 px-1.5 py-0.5 text-[11px] font-medium backdrop-blur">
-                  ★ {film.rating.toFixed(1)}
-                </span>
-              )}
-            </div>
-            <p className="mt-1.5 truncate text-xs font-medium text-foreground">{film.judul}</p>
-            <p className="text-[11px] text-muted-foreground">
-              {film.rilis ? film.rilis.slice(0, 4) : ""}
-            </p>
-          </Link>
-        ))}
-      </div>
-    </section>
-  );
-}
+/* ---------- Daftar episode ---------- */
 
 interface DaftarEpisodeProps {
   id: number;
+  /** Musim yang daftarnya sedang ditampilkan. */
   musim: number;
-  episodeAktif: number;
-  episodeSumber: number;
+  musimDiputar: number;
+  episodeDiputar: number;
   musimTersedia: { nomor: number; nama: string }[];
   onPilih: (musim: number, episode: number) => void;
+  onGantiMusim: (musim: number) => void;
 }
 
-/** Daftar episode satu musim + pemilih musim, seperti daftar tontonan berikutnya. */
 function DaftarEpisode({
   id,
   musim,
-  episodeAktif,
-  episodeSumber,
+  musimDiputar,
+  episodeDiputar,
   musimTersedia,
   onPilih,
+  onGantiMusim,
 }: DaftarEpisodeProps) {
   const daftar = useSuspenseQuery(opsiEpisode(id, musim));
   const episodes = daftar.data;
-  const nomorBerikutnya = episodeAktif + 1;
+  const urutan = [...episodes].sort((a, b) => a.nomor - b.nomor);
+  const indeksAktif = urutan.findIndex((e) => musim === musimDiputar && e.nomor === episodeDiputar);
+  const nomorBerikutnya = indeksAktif >= 0 ? urutan[indeksAktif + 1]?.nomor : undefined;
 
   return (
     <section className="mt-10">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:flex sm:items-center sm:justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="judul-bagian flex min-w-0 items-center gap-2 text-xl text-foreground">
           <ListVideo className="size-4 shrink-0 text-primary" />
-          <span className="truncate">Episode · Musim {musim}</span>
+          <span className="break-words">Episode · Musim {musim}</span>
         </h2>
         {musimTersedia.length > 1 && (
-          <div className="baris-gulir flex max-w-[55vw] gap-1.5 overflow-x-auto pb-1 sm:max-w-none">
+          <div
+            className="baris-gulir flex max-w-full gap-1.5 overflow-x-auto pb-1"
+            role="tablist"
+            aria-label="Pilih musim"
+          >
             {musimTersedia.map((m) => (
               <button
                 key={m.nomor}
                 type="button"
-                onClick={() => onPilih(m.nomor, 1)}
+                role="tab"
+                aria-selected={musim === m.nomor}
+                onClick={() => onGantiMusim(m.nomor)}
                 className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                   musim === m.nomor
                     ? "border-primary bg-primary text-primary-foreground"
                     : "border-border bg-card text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {m.nomor}
+                Musim {m.nomor}
               </button>
             ))}
           </div>
         )}
       </div>
       <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {episodes.map((ep: Episode) => {
-          const aktif = ep.nomor === episodeSumber;
-          const berikutnya = ep.nomor === nomorBerikutnya && episodeSumber === episodeAktif;
+        {urutan.map((ep: Episode) => {
+          const aktif = musim === musimDiputar && ep.nomor === episodeDiputar;
+          const berikutnya = !aktif && ep.nomor === nomorBerikutnya;
           return (
-            <li key={ep.nomor}>
+            <li key={ep.nomor} className="min-w-0">
               <button
                 type="button"
                 onClick={() => onPilih(musim, ep.nomor)}
                 className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-colors ${
-                  aktif
-                    ? "border-primary bg-primary/10"
-                    : "border-border/60 bg-card hover:bg-accent/40"
+                  aktif ? "border-primary bg-primary/10" : "border-border/60 bg-card hover:bg-accent/40"
                 }`}
               >
                 {ep.gambar ? (
@@ -287,17 +305,17 @@ function DaftarEpisode({
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <p className="flex items-start gap-2 text-sm font-medium text-foreground">
                     <span className="shrink-0 text-xs font-semibold text-primary">E{ep.nomor}</span>
-                    <span className="truncate">{ep.judul}</span>
+                    <span className="line-clamp-2 min-w-0 break-words">{ep.judul}</span>
                   </p>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {ep.tayang ? new Date(ep.tayang).toLocaleDateString("id-ID", { dateStyle: "medium" }) : ""}
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {ep.tayang
+                      ? new Date(ep.tayang).toLocaleDateString("id-ID", { dateStyle: "medium" })
+                      : ""}
                   </p>
-                  {aktif && (
-                    <p className="mt-0.5 text-[11px] font-medium text-primary">Sedang ditonton</p>
-                  )}
-                  {!aktif && berikutnya && (
+                  {aktif && <p className="mt-0.5 text-[11px] font-medium text-primary">Sedang ditonton</p>}
+                  {berikutnya && (
                     <p className="mt-0.5 text-[11px] font-medium text-primary/90">Tonton berikutnya</p>
                   )}
                 </div>
@@ -307,58 +325,72 @@ function DaftarEpisode({
         })}
       </ul>
       {episodes.length === 0 && (
-        <p className="mt-3 text-sm text-muted-foreground">
-          Daftar episode untuk musim ini belum tersedia.
-        </p>
+        <p className="mt-3 text-sm text-muted-foreground">Daftar episode untuk musim ini belum tersedia.</p>
       )}
     </section>
   );
 }
 
+/* ---------- Halaman utama pemutar ---------- */
+
+interface Berikutnya {
+  kunci: string;
+  label: string;
+  jalankan: () => void;
+}
+
 function HalamanNonton() {
   const { id: idParam } = Route.useParams();
-  const { jenis, s: musimUrl, e: episodeUrl, server: idxServer = 0 } = Route.useSearch();
+  const { jenis, s: musimUrl, e: episodeUrl, server: serverUrl } = Route.useSearch();
   const id = Number(idParam);
   const navigate = useNavigate();
   const kueri = useQueryClient();
   const { sesi } = useSesi();
+  const pengaturan = usePengaturan();
+  const idxServer = serverUrl ?? Math.min(pengaturan.serverUtama, DAFTAR_SERVER.length - 1);
 
-  // State episode: `episode` untuk tampilan, `sumber` untuk apa yang dimainkan iframe.
+  // `musim`: musim yang daftarnya sedang dibuka. `...Diputar`: episode yang sedang ditonton
+  // (bisa berubah karena CineSrc berpindah sendiri). `...Sumber`: alamat yang dimuat iframe,
+  // hanya berubah lewat pilihan pengguna agar iframe tidak dimuat ulang tanpa perlu.
   const [musim, setMusim] = useState(musimUrl ?? 1);
-  const [episode, setEpisode] = useState(episodeUrl ?? 1);
+  const [musimDiputar, setMusimDiputar] = useState(musimUrl ?? 1);
+  const [episodeDiputar, setEpisodeDiputar] = useState(episodeUrl ?? 1);
   const [musimSumber, setMusimSumber] = useState(musimUrl ?? 1);
   const [episodeSumber, setEpisodeSumber] = useState(episodeUrl ?? 1);
+  const [otomatis, setOtomatis] = useState(false);
+  const [selesai, setSelesai] = useState(false);
+  const [dibatalkan, setDibatalkan] = useState(false);
+  const [hitung, setHitung] = useState<number | null>(null);
+  const [layarPenuh, setLayarPenuh] = useState(false);
   const pemutarRef = useRef<HTMLDivElement>(null);
-  const [blokirIklan, setBlokirIklan] = useState(true);
-  useEffect(() => {
-    if (localStorage.getItem("blokirIklan") === "0") setBlokirIklan(false);
-  }, []);
-  useEffect(() => {
-    localStorage.setItem("blokirIklan", blokirIklan ? "1" : "0");
-  }, [blokirIklan]);
-  // Cegah iklan membuka jendela baru dari halaman ini.
-  useEffect(() => {
-    if (!blokirIklan) return;
-    const asli = window.open;
-    window.open = () => null;
-    return () => {
-      window.open = asli;
-    };
-  }, [blokirIklan]);
 
   const isTv = jenis === "tv";
   const jenisAktif: Jenis = isTv ? "tv" : "movie";
   const detailFilmQ = useQuery({ ...opsiDetailFilm(id), enabled: !isTv });
   const detailSeriesQ = useQuery({ ...opsiDetailSeries(id), enabled: isTv });
   const detail = (isTv ? detailSeriesQ.data : detailFilmQ.data) as DetailFilm | DetailSeries | undefined;
+  const episodeQ = useQuery({ ...opsiEpisode(id, musimDiputar), enabled: isTv });
+  const rekomendasiQ = useQuery(opsiRekomendasi(jenisAktif, id));
 
   // Sinkronkan state ketika pengguna datang dari halaman lain (riwayat, rekomendasi).
   useEffect(() => {
     setMusim(musimUrl ?? 1);
-    setEpisode(episodeUrl ?? 1);
+    setMusimDiputar(musimUrl ?? 1);
+    setEpisodeDiputar(episodeUrl ?? 1);
     setMusimSumber(musimUrl ?? 1);
     setEpisodeSumber(episodeUrl ?? 1);
   }, [id, musimUrl, episodeUrl]);
+
+  // Setiap judul/episode/server baru: hapus status "selesai" sebelumnya.
+  useEffect(() => {
+    setSelesai(false);
+    setDibatalkan(false);
+    setHitung(null);
+  }, [id, musimDiputar, episodeDiputar, idxServer]);
+
+  useEffect(() => {
+    tandaiDiputar(`${jenisAktif}-${id}`);
+  }, [jenisAktif, id]);
 
   // Catat riwayat tonton setiap kali judul/episode dimainkan.
   useEffect(() => {
@@ -369,36 +401,113 @@ function HalamanNonton() {
         idTmdb: id,
         judul: detail.judul,
         poster: detail.poster,
-        musim: isTv ? musimSumber : null,
-        episode: isTv ? episodeSumber : null,
+        musim: isTv ? musimDiputar : null,
+        episode: isTv ? episodeDiputar : null,
       },
     })
       .then(() => kueri.invalidateQueries({ queryKey: ["riwayat"] }))
       .catch(() => {});
-  }, [sesi, detail, id, jenis, isTv, musimSumber, episodeSumber, kueri]);
+  }, [sesi, detail, id, jenisAktif, isTv, musimDiputar, episodeDiputar, kueri]);
 
-  // Server 2 (CineSrc): ikuti pergantian episode di dalam pemutar tanpa memuat ulang iframe.
+  // Pesan dari pemutar: pergantian episode internal (CineSrc) dan tanda tontonan selesai.
   useEffect(() => {
-    if (!isTv || idxServer !== 1) return;
     function onPesan(ev: MessageEvent) {
-      if (ev.origin !== "https://cinesrc.st") return;
-      const data = ev.data as { type?: string; season?: number; episode?: number; internalNavigation?: boolean };
-      if (data?.type !== "cinesrc:nextepisode" || data.internalNavigation === false) return;
-      const s = Number(data.season);
-      const e = Number(data.episode);
-      if (s >= 1 && e >= 1) {
-        setMusim(s);
-        setEpisode(e);
+      if (!ASAL_PEMUTAR.has(ev.origin)) return;
+      let isi: unknown = ev.data;
+      if (typeof isi === "string") {
+        try {
+          isi = JSON.parse(isi);
+        } catch {
+          return;
+        }
+      }
+      if (!isi || typeof isi !== "object") return;
+      const o = isi as Record<string, unknown>;
+      const tipe = typeof o["type"] === "string" ? o["type"] : "";
+
+      if (ev.origin === "https://cinesrc.st") {
+        // CineSrc berpindah episode sendiri; cukup ikuti tampilannya.
+        if (tipe === "cinesrc:nextepisode" && o["internalNavigation"] !== false) {
+          const s = Number(o["season"]);
+          const e = Number(o["episode"]);
+          if (s >= 1 && e >= 1) {
+            setMusim(s);
+            setMusimDiputar(s);
+            setEpisodeDiputar(e);
+          }
+          return;
+        }
+        if (jenis === "tv") return;
+      }
+
+      const dalam = o["data"] && typeof o["data"] === "object" ? (o["data"] as Record<string, unknown>) : {};
+      const nama = typeof dalam["event"] === "string" ? dalam["event"] : "";
+      if (/ended$/i.test(tipe) || nama === "ended") {
+        setSelesai(true);
+        return;
+      }
+      if (nama === "timeupdate") {
+        const t = Number(dalam["currentTime"]);
+        const total = Number(dalam["duration"]);
+        if (total > 60 && t > 0 && total - t <= 2) setSelesai(true);
       }
     }
     window.addEventListener("message", onPesan);
     return () => window.removeEventListener("message", onPesan);
-  }, [isTv, idxServer]);
+  }, [jenis]);
+
+  // Layar penuh pada kotak pemutar sendiri (tanpa celah di tepi).
+  useEffect(() => {
+    function ubah() {
+      const el = pemutarRef.current;
+      const aktif =
+        !!el &&
+        (document.fullscreenElement === el ||
+          (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement === el);
+      setLayarPenuh(aktif);
+      if (!aktif) {
+        try {
+          screen.orientation?.unlock?.();
+        } catch {
+          /* tidak didukung */
+        }
+      }
+    }
+    document.addEventListener("fullscreenchange", ubah);
+    document.addEventListener("webkitfullscreenchange", ubah);
+    return () => {
+      document.removeEventListener("fullscreenchange", ubah);
+      document.removeEventListener("webkitfullscreenchange", ubah);
+    };
+  }, []);
+
+  async function toggleLayarPenuh() {
+    const el = pemutarRef.current as (HTMLDivElement & { webkitRequestFullscreen?: () => void }) | null;
+    if (!el) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (el.requestFullscreen) {
+        await el.requestFullscreen();
+        try {
+          await (screen.orientation as unknown as { lock?: (o: string) => Promise<void> })?.lock?.("landscape");
+        } catch {
+          /* tidak semua perangkat mengizinkan kunci orientasi */
+        }
+      } else if (el.webkitRequestFullscreen) {
+        el.webkitRequestFullscreen();
+      } else {
+        toast("Gunakan tombol layar penuh di dalam pemutar.");
+      }
+    } catch {
+      toast("Layar penuh tidak tersedia. Gunakan tombol layar penuh di dalam pemutar.");
+    }
+  }
 
   const server = DAFTAR_SERVER[idxServer] ?? DAFTAR_SERVER[0];
   const alamat = useMemo(
-    () => server.alamat(id, jenisAktif, musimSumber, episodeSumber),
-    [server, id, jenisAktif, musimSumber, episodeSumber],
+    () => server.alamat(id, jenisAktif, musimSumber, episodeSumber, otomatis),
+    [server, id, jenisAktif, musimSumber, episodeSumber, otomatis],
   );
 
   const tersimpan = useQuery({
@@ -412,6 +521,7 @@ function HalamanNonton() {
       toast("Masuk dulu untuk menyimpan.");
       return;
     }
+    if (!detail) return;
     const nilai = !tersimpan.data;
     try {
       await setTersimpan({
@@ -420,11 +530,11 @@ function HalamanNonton() {
           mediaType: jenisAktif,
           film: {
             idTmdb: id,
-            judul: detail!.judul,
-            poster: detail!.poster,
-            sinopsis: detail!.sinopsis,
-            rilis: detail!.rilis,
-            rating: detail!.rating,
+            judul: detail.judul,
+            poster: detail.poster,
+            sinopsis: detail.sinopsis,
+            rilis: detail.rilis,
+            rating: detail.rating,
           },
         },
       });
@@ -436,27 +546,104 @@ function HalamanNonton() {
     }
   }
 
-  function pilihEpisode(m: number, e: number) {
-    setMusim(m);
-    setEpisode(e);
-    setMusimSumber(m);
-    setEpisodeSumber(e);
-    navigate({
-      to: "/nonton/$id",
-      params: { id: idParam },
-      search: (prev) => ({ ...prev, s: m, e }),
-      replace: true,
-    });
-    pemutarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+  const pilihEpisode = useCallback(
+    (m: number, e: number, dariOtomatis = false) => {
+      setMusim(m);
+      setMusimDiputar(m);
+      setEpisodeDiputar(e);
+      setMusimSumber(m);
+      setEpisodeSumber(e);
+      setOtomatis(dariOtomatis);
+      navigate({
+        to: "/nonton/$id",
+        params: { id: idParam },
+        search: (prev) => ({ ...prev, s: m, e }),
+        replace: true,
+      });
+      pemutarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    },
+    [navigate, idParam],
+  );
 
   function pilihServer(t: number) {
+    setOtomatis(false);
     navigate({
       to: "/nonton/$id",
       params: { id: idParam },
       search: (prev) => ({ ...prev, server: t }),
+      replace: true,
     });
   }
+
+  /** Apa yang diputar setelah ini: episode berikutnya (series) atau film rekomendasi sama genre. */
+  const berikutnya: Berikutnya | null = useMemo(() => {
+    if (isTv) {
+      const urutan = [...(episodeQ.data ?? [])].sort((a, b) => a.nomor - b.nomor);
+      const indeks = urutan.findIndex((e) => e.nomor === episodeDiputar);
+      if (indeks < 0) return null;
+      const sudahTayang = (e: Episode) => !e.tayang || new Date(e.tayang).getTime() <= Date.now();
+      const lanjut = urutan[indeks + 1];
+      if (lanjut && sudahTayang(lanjut)) {
+        return {
+          kunci: `tv-${id}-${musimDiputar}-${lanjut.nomor}`,
+          label: `Musim ${musimDiputar} · Episode ${lanjut.nomor}${lanjut.judul ? ` — ${lanjut.judul}` : ""}`,
+          jalankan: () => pilihEpisode(musimDiputar, lanjut.nomor, true),
+        };
+      }
+      if (!lanjut) {
+        const musimLain = ((detail as DetailSeries | undefined)?.musim ?? [])
+          .filter((m) => m.nomor > musimDiputar)
+          .sort((a, b) => a.nomor - b.nomor)[0];
+        if (musimLain) {
+          return {
+            kunci: `tv-${id}-${musimLain.nomor}-1`,
+            label: `Musim ${musimLain.nomor} · Episode 1`,
+            jalankan: () => pilihEpisode(musimLain.nomor, 1, true),
+          };
+        }
+      }
+      return null;
+    }
+    const sudah = new Set(bacaDiputar());
+    const calon = (rekomendasiQ.data ?? []).find((f) => !sudah.has(`movie-${f.id}`) && f.id !== id);
+    if (!calon) return null;
+    return {
+      kunci: `movie-${calon.id}`,
+      label: calon.judul,
+      jalankan: () => {
+        setOtomatis(true);
+        navigate({
+          to: "/nonton/$id",
+          params: { id: String(calon.id) },
+          search: { jenis: "movie", ...(serverUrl !== undefined ? { server: serverUrl } : {}) },
+        });
+      },
+    };
+    // `selesai` ikut agar daftar "sudah diputar" dibaca ulang saat tontonan selesai.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTv, episodeQ.data, episodeDiputar, musimDiputar, detail, rekomendasiQ.data, id, pilihEpisode, navigate, serverUrl, selesai]);
+
+  const berikutnyaRef = useRef<Berikutnya | null>(null);
+  berikutnyaRef.current = berikutnya;
+  const kunciBerikutnya = berikutnya?.kunci ?? null;
+
+  // Hitung mundur autoplay setelah tontonan selesai.
+  useEffect(() => {
+    if (!selesai || !pengaturan.autoplay || !kunciBerikutnya || dibatalkan) {
+      setHitung(null);
+      return undefined;
+    }
+    setHitung(JEDA_AUTOPLAY_DETIK);
+    const jam = setInterval(() => setHitung((h) => (h === null ? null : h - 1)), 1000);
+    return () => clearInterval(jam);
+  }, [selesai, pengaturan.autoplay, kunciBerikutnya, dibatalkan]);
+
+  useEffect(() => {
+    if (hitung !== null && hitung <= 0) {
+      setHitung(null);
+      berikutnyaRef.current?.jalankan();
+    }
+  }, [hitung]);
 
   if (!detail) {
     return (
@@ -466,11 +653,13 @@ function HalamanNonton() {
     );
   }
 
+  const blokirIklan = pengaturan.blokirIklan;
+
   return (
     <main className="mx-auto w-full min-w-0 max-w-5xl px-4 pb-16">
       <Link
         to="/"
-        search={jenis === "tv" ? { jenis: "tv" } : {}}
+        search={isTv ? { jenis: "tv" } : {}}
         className="mt-4 inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-4" />
@@ -496,58 +685,105 @@ function HalamanNonton() {
         ))}
       </div>
 
-      {/* Pemutar */}
+      {/* Pemutar: tepi ke tepi di HP, tanpa celah di bawah iframe */}
       <div
         ref={pemutarRef}
-        className="mt-3 overflow-hidden rounded-xl border border-border/60 bg-black shadow-layar"
+        className="relative -mx-4 mt-3 overflow-hidden bg-black shadow-layar sm:mx-0 sm:rounded-xl sm:border sm:border-border/60"
       >
-        <iframe
-          key={`${server.nama}-${id}-${isTv}-${musimSumber}-${episodeSumber}-${blokirIklan}`}
-          src={alamat}
-          title={`Pemutar ${server.nama} — ${detail?.judul ?? ""}`}
-          className="aspect-video w-full"
-          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-          allowFullScreen
-          referrerPolicy="origin"
-          // Tanpa allow-popups & allow-top-navigation: iklan tidak bisa membuka tab baru / mengalihkan halaman.
-          sandbox={
-            blokirIklan
-              ? "allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock"
-              : undefined
-          }
-        />
-      </div>
-      <div className="mt-2 flex flex-col items-center gap-1.5 text-center text-xs text-muted-foreground">
-        <label className="inline-flex cursor-pointer items-center gap-2 font-medium text-foreground">
-          <input
-            type="checkbox"
-            checked={blokirIklan}
-            onChange={(e) => setBlokirIklan(e.target.checked)}
-            className="size-4 accent-primary"
+        <div className={layarPenuh ? "relative h-full w-full" : "relative aspect-video w-full"}>
+          <iframe
+            key={`${server.nama}-${id}-${isTv}-${musimSumber}-${episodeSumber}-${blokirIklan}-${otomatis}`}
+            src={alamat}
+            title={`Pemutar ${server.nama} — ${detail.judul}`}
+            className="absolute inset-0 block size-full border-0"
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            allowFullScreen
+            referrerPolicy="origin"
+            // Tanpa allow-popups & allow-top-navigation: iklan tidak bisa membuka tab baru / mengalihkan halaman.
+            sandbox={
+              blokirIklan
+                ? "allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock"
+                : undefined
+            }
           />
-          Blokir iklan & pop-up
-        </label>
-        <p>
-          Film tidak muncul? Pindah server dulu. Kalau server tetap menolak, matikan blokir iklan sebentar.
-        </p>
+          {hitung !== null && berikutnya && (
+            <div className="absolute inset-x-0 bottom-0 flex justify-center p-3">
+              <div className="w-full max-w-md rounded-xl border border-border/60 bg-background/95 p-3 shadow-layar backdrop-blur">
+                <p className="text-xs text-muted-foreground">Berikutnya dalam {hitung} detik</p>
+                <p className="mt-0.5 line-clamp-2 break-words text-sm font-medium text-foreground">
+                  {berikutnya.label}
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" onClick={() => berikutnya.jalankan()}>
+                    <SkipForward className="size-4" />
+                    Putar sekarang
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setDibatalkan(true)}>
+                    <X className="size-4" />
+                    Batal
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
+
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={toggleLayarPenuh}>
+            {layarPenuh ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
+            {layarPenuh ? "Keluar layar penuh" : "Layar penuh"}
+          </Button>
+          {berikutnya && (
+            <Button variant="outline" size="sm" onClick={() => berikutnya.jalankan()}>
+              <SkipForward className="size-4" />
+              {isTv ? "Episode berikutnya" : "Film berikutnya"}
+            </Button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <label className="inline-flex cursor-pointer items-center gap-2 font-medium text-foreground">
+            <input
+              type="checkbox"
+              checked={pengaturan.autoplay}
+              onChange={(e) => ubahPengaturan({ autoplay: e.target.checked })}
+              className="size-4 accent-primary"
+            />
+            Putar otomatis
+          </label>
+          <label className="inline-flex cursor-pointer items-center gap-2 font-medium text-foreground">
+            <input
+              type="checkbox"
+              checked={blokirIklan}
+              onChange={(e) => ubahPengaturan({ blokirIklan: e.target.checked })}
+              className="size-4 accent-primary"
+            />
+            Blokir iklan & pop-up
+          </label>
+        </div>
+      </div>
+      <p className="mt-2 break-words text-xs text-muted-foreground">
+        Tidak muncul atau error? Pindah server dulu. Kalau server tetap menolak, matikan blokir iklan
+        sebentar.
+      </p>
 
       {/* Info judul */}
       <section className="mt-6">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:flex sm:flex-wrap sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h1 className="judul-bagian text-3xl leading-none text-foreground sm:text-4xl">
-              {detail?.judul}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="judul-bagian break-words text-3xl leading-none text-foreground sm:text-4xl">
+              {detail.judul}
             </h1>
             <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Star className="size-4 fill-primary text-primary" />
-                {(detail?.rating ?? 0).toFixed(1)}
+                {(detail.rating ?? 0).toFixed(1)}
               </span>
-              {!!detail?.rilis && <span>{detail.rilis.slice(0, 4)}</span>}
+              {!!detail.rilis && <span>{detail.rilis.slice(0, 4)}</span>}
               {isTv && (
                 <span className="rounded-full border border-border bg-card px-2 py-0.5 text-xs">
-                  Series · S{musim} E{episode}
+                  Series · S{musimDiputar} E{episodeDiputar}
                 </span>
               )}
               {!isTv && !!(detail as DetailFilm).durasi_menit && (
@@ -578,9 +814,9 @@ function HalamanNonton() {
           </Button>
         </div>
 
-        {(detail as DetailFilm).genres?.length ? (
+        {detail.genres?.length ? (
           <div className="mt-3 flex flex-wrap gap-2">
-            {(detail as DetailFilm).genres.map((g) => (
+            {detail.genres.map((g) => (
               <Badge key={g.id} variant="secondary">
                 {g.nama}
               </Badge>
@@ -588,35 +824,31 @@ function HalamanNonton() {
           </div>
         ) : null}
 
-        {detail?.sinopsis && (
-          <p className="mt-4 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+        {detail.sinopsis && (
+          <p className="mt-4 max-w-3xl break-words text-sm leading-relaxed text-muted-foreground">
             {detail.sinopsis}
           </p>
         )}
       </section>
 
-      {/* Daftar episode untuk series — seperti daftar tontonan berikutnya */}
-      {isTv && detail && (
-        <Suspense
-          fallback={<p className="mt-10 text-sm text-muted-foreground">Memuat daftar episode…</p>}
-        >
+      {/* Daftar episode untuk series */}
+      {isTv && (
+        <Suspense fallback={<p className="mt-10 text-sm text-muted-foreground">Memuat daftar episode…</p>}>
           <DaftarEpisode
             id={id}
             musim={musim}
-            episodeAktif={episode}
-            episodeSumber={episodeSumber}
-            musimTersedia={(detail as DetailSeries).musim.map((m) => ({
-              nomor: m.nomor,
-              nama: m.nama,
-            }))}
-            onPilih={pilihEpisode}
+            musimDiputar={musimDiputar}
+            episodeDiputar={episodeDiputar}
+            musimTersedia={(detail as DetailSeries).musim.map((m) => ({ nomor: m.nomor, nama: m.nama }))}
+            onPilih={(m, e) => pilihEpisode(m, e)}
+            onGantiMusim={(m) => setMusim(m)}
           />
         </Suspense>
       )}
 
       {/* Rekomendasi selanjutnya */}
       <Suspense fallback={null}>
-        {isTv ? <RekomendasiSeries id={id} /> : <RekomendasiFilm id={id} />}
+        <BarisRekomendasi jenis={jenisAktif} id={id} />
       </Suspense>
     </main>
   );

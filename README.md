@@ -1,29 +1,41 @@
-# Welcome to your Lovable project
+# NontonKu
 
-This project was built with [Lovable](https://lovable.dev).
+Website streaming film dan series: jelajahi katalog populer, cari judul di film dan series sekaligus,
+pilih server pemutar, simpan riwayat dan daftar tontonan.
 
-## Build with Lovable
+## Fitur
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+- **Beranda**: film/series populer mingguan, filter genre, pindah Film ↔ Series, dan halaman berikutnya.
+- **Pencarian**: satu kolom untuk film *dan* series sekaligus berdasarkan judul.
+- **Pemutar**: 3 server, layar penuh tanpa celah, daftar episode, putar otomatis episode/film berikutnya
+  dengan genre yang sama.
+- **Akun** (ID + kata sandi, tanpa email): riwayat tonton dan film/series tersimpan.
+- **About → Pengaturan**: putar otomatis, server utama, blokir iklan, popup donasi harian.
 
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+## Menjalankan
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+bun install        # atau: npm install
+cp .env.example .env   # lalu isi nilainya
+bun run dev        # atau: npm run dev
 ```
 
-## Built with
+Skrip lain: `bun run build`, `bun run test`, `bun run lint`.
 
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS
+## Konfigurasi
+
+| Variabel | Fungsi |
+| --- | --- |
+| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` (+ versi `VITE_`) | Akun, riwayat, dan daftar tersimpan |
+| `TMDB_API_KEY` | Data film & series (hanya dipakai di server) |
+
+Tautan donasi diatur di `src/lib/konfigurasi.ts` (`TAUTAN_DONASI`).
+
+Skema database ada di `drizzle/migrations/0000_nontonku_tables.sql`.
+
+## Teknologi
+
+TanStack Start, React, TypeScript, Tailwind CSS, Supabase, TMDB API.
+
+Data film & series berasal dari TMDB. Aplikasi ini memakai API TMDB tetapi tidak didukung atau
+disertifikasi oleh TMDB.

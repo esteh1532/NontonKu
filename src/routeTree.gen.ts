@@ -10,9 +10,9 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as CariRouteImport } from './routes/cari'
 import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AuthenticatedAkunRouteImport } from './routes/_authenticated/akun'
+import { Route as AboutRouteImport } from './routes/about'
 import { Route as NontonIdRouteImport } from './routes/nonton.$id'
 
 const IndexRoute = IndexRouteImport.update({
@@ -20,8 +20,9 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedRoute = AuthenticatedRouteImport.update({
-  id: '/_authenticated',
+const CariRoute = CariRouteImport.update({
+  id: '/cari',
+  path: '/cari',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -29,10 +30,10 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedAkunRoute = AuthenticatedAkunRouteImport.update({
-  id: '/akun',
-  path: '/akun',
-  getParentRoute: () => AuthenticatedRoute,
+const AboutRoute = AboutRouteImport.update({
+  id: '/about',
+  path: '/about',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const NontonIdRoute = NontonIdRouteImport.update({
   id: '/nonton/$id',
@@ -42,42 +43,39 @@ const NontonIdRoute = NontonIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
   '/auth': typeof AuthRoute
-  '/akun': typeof AuthenticatedAkunRoute
+  '/cari': typeof CariRoute
   '/nonton/$id': typeof NontonIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
   '/auth': typeof AuthRoute
-  '/akun': typeof AuthenticatedAkunRoute
+  '/cari': typeof CariRoute
   '/nonton/$id': typeof NontonIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/_authenticated': typeof AuthenticatedRouteWithChildren
+  '/about': typeof AboutRoute
   '/auth': typeof AuthRoute
-  '/_authenticated/akun': typeof AuthenticatedAkunRoute
+  '/cari': typeof CariRoute
   '/nonton/$id': typeof NontonIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/akun' | '/nonton/$id'
+  fullPaths: '/' | '/about' | '/auth' | '/cari' | '/nonton/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/akun' | '/nonton/$id'
-  id:
-    | '__root__'
-    | '/'
-    | '/_authenticated'
-    | '/auth'
-    | '/_authenticated/akun'
-    | '/nonton/$id'
+  to: '/' | '/about' | '/auth' | '/cari' | '/nonton/$id'
+  id: '__root__' | '/' | '/about' | '/auth' | '/cari' | '/nonton/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
+  AboutRoute: typeof AboutRoute
   AuthRoute: typeof AuthRoute
+  CariRoute: typeof CariRoute
   NontonIdRoute: typeof NontonIdRoute
 }
 
@@ -90,11 +88,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated': {
-      id: '/_authenticated'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AuthenticatedRouteImport
+    '/cari': {
+      id: '/cari'
+      path: '/cari'
+      fullPath: '/cari'
+      preLoaderRoute: typeof CariRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -104,12 +102,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/akun': {
-      id: '/_authenticated/akun'
-      path: '/akun'
-      fullPath: '/akun'
-      preLoaderRoute: typeof AuthenticatedAkunRouteImport
-      parentRoute: typeof AuthenticatedRoute
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/nonton/$id': {
       id: '/nonton/$id'
@@ -121,22 +119,11 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface AuthenticatedRouteChildren {
-  AuthenticatedAkunRoute: typeof AuthenticatedAkunRoute
-}
-
-const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
-  AuthenticatedAkunRoute: AuthenticatedAkunRoute,
-}
-
-const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
-  AuthenticatedRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AuthenticatedRoute: AuthenticatedRouteWithChildren,
+  AboutRoute: AboutRoute,
   AuthRoute: AuthRoute,
+  CariRoute: CariRoute,
   NontonIdRoute: NontonIdRoute,
 }
 export const routeTree = rootRouteImport

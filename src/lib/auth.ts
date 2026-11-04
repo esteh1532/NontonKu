@@ -4,7 +4,7 @@
  * ID pengguna dipetakan ke alamat email internal `id@akun.nontonku.lokal`
  * milik layanan backend, jadi pengguna hanya perlu mengingat ID dan sandi.
  */
-import { useEffect, useState } from "react";
+import { createContext, createElement, useContext, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -92,27 +92,60 @@ function ubahKeSesi(user: { id: string; user_metadata?: Record<string, unknown> 
   };
 }
 
-/** Hook sesi: siapa yang sedang masuk, dipakai di bilah atas dan halaman. */
-export function useSesi() {
+interface NilaiSesi {
+  sesi: Sesi | null;
+  memuat: boolean;
+}
+
+const KonteksSesi = createContext<NilaiSesi>({ sesi: null, memuat: true });
+
+/**
+ * Satu-satunya pendengar status login untuk seluruh aplikasi.
+ * Sebelumnya setiap komponen membuat pendengarnya sendiri sehingga data
+ * dimuat ulang berkali-kali setiap kali login/logout.
+ */
+export function SesiProvider({ children }: { children: ReactNode }) {
   const [sesi, setSesi] = useState<Sesi | null>(null);
   const [memuat, setMemuat] = useState(true);
   const router = useRouter();
   const kueri = useQueryClient();
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSesi(ubahKeSesi(data.session?.user ?? null));
-      setMemuat(false);
-    });
+    let aktif = true;
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!aktif) return;
+        setSesi(ubahKeSesi(data.session?.user ?? null));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (aktif) setMemuat(false);
+      });
     const langganan = supabase.auth.onAuthStateChange((peristiwa, sesiBaru) => {
       setSesi(ubahKeSesi(sesiBaru?.user ?? null));
       if (peristiwa !== "SIGNED_IN" && peristiwa !== "SIGNED_OUT" && peristiwa !== "USER_UPDATED") return;
-      router.invalidate();
-      if (peristiwa === "SIGNED_OUT") kueri.clear();
-      else kueri.invalidateQueries();
+      // Jangan memanggil Supabase langsung di dalam callback ini.
+      setTimeout(() => {
+        router.invalidate();
+        if (peristiwa === "SIGNED_OUT") kueri.clear();
+        else {
+          for (const kunci of ["riwayat", "koleksi", "tersimpan"]) {
+            kueri.invalidateQueries({ queryKey: [kunci] });
+          }
+        }
+      }, 0);
     });
-    return () => langganan.data.subscription.unsubscribe();
+    return () => {
+      aktif = false;
+      langganan.data.subscription.unsubscribe();
+    };
   }, [router, kueri]);
 
-  return { sesi, memuat };
+  return createElement(KonteksSesi.Provider, { value: { sesi, memuat } }, children);
+}
+
+/** Hook sesi: siapa yang sedang masuk, dipakai di navigasi dan halaman. */
+export function useSesi() {
+  return useContext(KonteksSesi);
 }
